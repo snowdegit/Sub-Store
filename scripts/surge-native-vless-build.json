@@ -1,0 +1,6 @@
+{
+  "source": "backend/src/core/proxy-utils/producers/surge.js",
+  "artifact": "scripts/sub-store-1.min.js",
+  "upstream_base": "d8fc0e69a7f472485d338049b85d20d3f44b41a5",
+  "artifact_sha256": "5ba23d36a57c6f9fb480abbf195813e6f24784186917a80b856e4c13adf6a669"
+}

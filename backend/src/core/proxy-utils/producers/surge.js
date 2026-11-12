@@ -176,6 +176,8 @@ export default function Surge_Producer() {
             proxy.ports = String(proxy.ports);
         }
         switch (proxy.type) {
+            case 'vless':
+                return nativeVless(proxy);
             case 'ss':
                 return shadowsocks(proxy);
             case 'trojan':
@@ -227,6 +229,102 @@ export default function Surge_Producer() {
         );
     };
     return { produce };
+}
+
+// Local compatibility addition: Surge iOS 6+ / Mac 6.12+ native TCP VLESS.
+// Does not change any existing producer, parser, filter, request or storage logic.
+function nativeVless(proxy) {
+    function invalid(message) {
+        throw unsupported('Surge native VLESS: ' + message);
+    }
+    function quote(value) {
+        var s = String(value);
+        if (/[\x00-\x1f\x7f"\\]/.test(s)) invalid('invalid field character');
+        return '"' + s + '"';
+    }
+    var transport = proxy.network || 'tcp';
+    if (transport !== 'tcp' && transport !== 'raw')
+        invalid('only TCP/RAW is implemented in this local patch');
+    if (proxy.encryption && proxy.encryption !== 'none')
+        invalid('VLESS encryption is unsupported');
+    if (!proxy.uuid || !proxy.server || !proxy.port)
+        invalid('missing UUID/server/port');
+    if (
+        !Number.isInteger(Number(proxy.port)) ||
+        +proxy.port < 1 ||
+        +proxy.port > 65535
+    )
+        invalid('invalid port');
+    if (
+        proxy.flow &&
+        ['xtls-rprx-vision', 'xtls-rprx-vision-udp443'].indexOf(proxy.flow) < 0
+    )
+        invalid('unsupported flow');
+    var reality = proxy['reality-opts'];
+    var host = String(proxy.server);
+    if (host.indexOf(':') >= 0 && host.charAt(0) !== '[')
+        host = '[' + host + ']';
+    if (/[\s,"=\\]/.test(host)) invalid('invalid server');
+    var out =
+        proxy.name +
+        '=vless,' +
+        host +
+        ',' +
+        proxy.port +
+        ',username=' +
+        quote(proxy.uuid);
+    if (proxy.flow) {
+        if (!reality && !proxy.tls) invalid('Vision requires TLS or Reality');
+        out += ',flow=' + proxy.flow;
+    }
+    if (reality) {
+        if (!reality['public-key'] || !proxy.sni)
+            invalid('Reality requires public key and SNI');
+        if (!/^[A-Za-z0-9_+\/-]{43}=?$/.test(reality['public-key']))
+            invalid('invalid Reality public key');
+        var shortId =
+            reality['short-id'] == null ? '' : String(reality['short-id']);
+        if (!/^(?:[0-9a-fA-F]{2}){0,8}$/.test(shortId))
+            invalid('invalid Reality short-id');
+        out +=
+            ',sni=' +
+            quote(proxy.sni) +
+            ',reality-public-key=' +
+            quote(reality['public-key']) +
+            ',reality-short-id=' +
+            quote(shortId);
+    } else {
+        if (proxy.tls) out += ',tls=true';
+        if (proxy.sni) out += ',sni=' + quote(proxy.sni);
+        if (proxy['skip-cert-verify'] != null)
+            out += ',skip-cert-verify=' + !!proxy['skip-cert-verify'];
+        if (proxy.alpn)
+            out +=
+                ',alpn=' +
+                quote(
+                    Array.isArray(proxy.alpn)
+                        ? proxy.alpn.join(',')
+                        : proxy.alpn,
+                );
+    }
+    if (proxy.tfo != null) out += ',tfo=' + !!proxy.tfo;
+    if (proxy['block-quic'] != null)
+        out += ',block-quic=' + proxy['block-quic'];
+    if (proxy['test-url']) out += ',test-url=' + quote(proxy['test-url']);
+    if (proxy['test-timeout'] != null)
+        out += ',test-timeout=' + Number(proxy['test-timeout']);
+    if (proxy['ip-version']) {
+        var modes = {
+            ipv4: 'v4-only',
+            ipv6: 'v6-only',
+            'ipv4-prefer': 'prefer-v4',
+            'ipv6-prefer': 'prefer-v6',
+        };
+        out +=
+            ',ip-version=' +
+            (modes[proxy['ip-version']] || proxy['ip-version']);
+    }
+    return out;
 }
 
 function shadowsocks(proxy) {
